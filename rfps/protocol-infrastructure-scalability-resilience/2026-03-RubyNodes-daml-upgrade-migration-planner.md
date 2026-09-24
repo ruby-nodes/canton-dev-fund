@@ -1,4 +1,9 @@
-## Development Fund Proposal
+# Party-Aware Daml Upgrade and Vetting Planner
+
+**Proposal Type:** Development Fund Proposal
+**Primary RFP:** RFP 3 — Automated Application Management
+**Roadmap Category:** Protocol, Infrastructure, Scalability & Resilience
+**Secondary Alignment:** RFP 18 — Integration into SDLCs
 
 **Author:** Petr Mensik, Ruby Nodes  
 **Status:** Draft  
@@ -12,11 +17,21 @@ Upgrading Daml packages on Canton is a multi-step process that touches package u
 
 The platform provides good primitives for each step — compile-time compatibility checking, server-side DAR validation, vetting simulation, and Ledger API access to active contract state — but no tool connects them into a single, reviewable migration plan that accounts for a participant's actual deployed state.
 
-The Daml Upgrade Migration Planner is a CLI tool that inventories a participant's current package, contract, and vetting state, analyzes one or more proposed DAR files against that state, and produces a concrete, ordered migration plan: what to upload, in what sequence, which packages need direct vetting on each synchronizer, what compatibility or package-selection rules apply, whether old packages can be safely unvetted, what force flags may be required, what the expected end state looks like, and what can be rolled back if something goes wrong.
+The Party-Aware Daml Upgrade and Vetting Planner is a CLI tool that inventories a participant's current package, contract, and vetting state, analyzes one or more proposed DAR files against that state, and produces a concrete, ordered migration plan: what to upload, in what sequence, which packages need direct vetting on each synchronizer, what compatibility or package-selection rules apply, whether old packages can be safely unvetted, what force flags may be required, what the expected end state looks like, and what can be rolled back if something goes wrong.
 
 The output is a structured artifact (JSON + Markdown) suitable for team review, change ticket attachment, or CI gate integration. Each plan records the ledger, topology, environment, and configuration state it was derived from and reports package support scoped to the local participant, its target synchronizers, explicitly configured external participants, and explicitly configured readiness parties using the topology snapshot visible to the participant.
 
 V1 ships as a standalone CLI, with the planning engine kept separate from the command-line layer. The same executable may also be packaged as a third-party opt-in `dpm` component without requiring first-party inclusion. Bundling it with `dpm`, publishing it through an official component registry, or exposing it as a built-in command remains subject to maintainer agreement.
+
+---
+
+## Ecosystem Need and Adoption
+
+Daml application upgrades require teams to combine package compatibility, dependency, active-contract, vetting, synchronizer, party-hosting, and topology evidence. Canton provides the authoritative primitives for these individual checks, but application providers and operators still need to assemble them manually into an upgrade decision and rollout sequence. This results in bespoke runbooks, repeated integration work, and upgrade risks that each application team must address independently.
+
+The planner provides a shared, reviewable preflight artifact for application providers and release teams deploying upgrades, Validator operators reviewing package support, hosted parties or their delegates evaluating application readiness, and platform and SRE teams controlling production changes. It does not replace Canton's vetting or compatibility mechanisms; it makes their results usable together and reports incomplete evidence rather than inferring readiness.
+
+Reducing the expertise, operational effort, and uncertainty required to upgrade a Daml application lowers its ongoing cost of operation. Repeatable upgrade planning helps existing applications evolve safely and makes it easier for new teams and hosted parties to adopt and maintain applications on Canton without first building proprietary package-management scripts and review processes.
 
 ---
 
@@ -308,6 +323,7 @@ Week numbers are counted from project kickoff (week 0), which follows grant appr
 - **Deliverables / Value Metrics:**
   - public Apache-2.0 repository with project scaffolding, build, test, CI, and release foundations;
   - documented outreach to the `dpm` maintainers, with any integration constraints received recorded for the core/CLI boundary;
+  - documented validation of the planner's distinction between operator-level package support and party-level package readiness with relevant Canton SDK/API maintainers, including any resulting API assumptions or limitations;
   - CLI connected to cn-quickstart LocalNet;
   - both the JVM and GraalVM native-image distributions execute the same representative end-to-end planning path through the generated Canton gRPC client;
   - initial collection of uploaded packages, per-synchronizer vetting state, active-contract counts visible to the configured identity with that visibility scope recorded, and state provenance;
@@ -552,7 +568,7 @@ Teams running Daml applications on Canton eventually need to upgrade their packa
 
 Concrete failure patterns encountered by operators include upgrades blocked because required packages are not yet vetted, divergent per-environment package strategies, and the need to track migration progress against existing contracts.
 
-The planner is common-good infrastructure because the planning logic is structural rather than application-specific: package metadata, participant state, active-contract references, topology state, and environment configuration follow the same model across Daml applications. Primary beneficiaries are application and release teams deploying DAR upgrades, platform and SRE teams preparing maintenance windows, validator operators evaluating vetting requests, CI/CD pipelines needing an automated pre-deployment gate, and technical reviewers who need a stable artifact showing what is planned and what remains unknown.
+The planner is common-good infrastructure because the planning logic is structural rather than application-specific: package metadata, participant state, active-contract references, topology state, and environment configuration follow the same model across Daml applications. Primary beneficiaries are application providers and release teams deploying DAR upgrades, Validator operators evaluating package support, hosted parties or their delegates evaluating application readiness, platform and SRE teams preparing maintenance windows, CI/CD pipelines needing an automated pre-deployment gate, and technical reviewers who need a stable artifact showing what is planned and what remains unknown.
 
 The Markdown report is designed for change-management workflows: generate a point-in-time plan, attach it to a change ticket, review the evidence and blockers, obtain sign-off, then execute using existing operational tooling.
 
@@ -561,6 +577,12 @@ The adoption path has two stages. After the M1 vertical slice, design partners t
 ---
 
 ## Rationale
+
+### Relationship to party-level package vetting
+
+Digital Asset is developing party-level package vetting as the authoritative mechanism through which hosted parties can control package adoption. This proposal does not implement or replace that mechanism. Canton remains the source of truth for package vetting and compatibility, while the planner combines the package-support, party-hosting, contract-state, synchronizer, and topology evidence exposed by Canton into a reviewable upgrade plan.
+
+V1 evaluates explicitly configured readiness parties through the interfaces available on its supported Canton versions, principally `GetPreferredPackages` together with visible party-hosting and per-participant vetting topology. Where party-level adoption state or evidence for a hosting participant is not observable, the planner reports `INCOMPLETE_EVIDENCE` rather than inferring readiness. Additional authoritative party-level interfaces can be supported through the existing isolated API-adapter architecture without changing the planner's read-only role.
 
 ### What makes this tool distinct
 
@@ -574,7 +596,7 @@ The Migration Planner is not a compatibility checker — compatibility checking 
 
 **Kotlin + GraalVM native-image.** Kotlin provides direct reuse of existing Canton/Daml protobuf bindings and alignment with the JVM-based Canton ecosystem. GraalVM native-image compiles to a single binary with fast startup and no JVM dependency at runtime. Rust was considered for its native binary story, but protobuf binding reuse and ecosystem alignment favored Kotlin. Keeping the planner core separate from the CLI preserves a practical route into `dpm`.
 
-**Single-participant execution scope.** The tool connects to and plans from one participant at a time, reporting observable vetting evidence for explicitly configured external participants and common package support for explicitly configured readiness parties without coordinating remote participants. This keeps the trust and execution model bounded.
+**Single-participant execution scope.** The tool connects to and plans from one participant at a time, reporting observable vetting evidence for explicitly configured external participants and common package support for explicitly configured readiness parties without coordinating remote participants. In V1, *party-aware* means evaluating this observable support for configured parties; it does not mean connecting administratively to every hosting Validator, determining private party preferences, submitting party-level vetting transactions, or coordinating adoption across organizations. This keeps the trust and execution model bounded.
 
 **Plan-first, rehearsal-optional.** The core value is the reviewable and deterministic plan artifact. Rehearsal validates the plan through read-only and dry-run calls but does not apply it.
 
